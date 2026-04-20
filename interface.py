@@ -3,6 +3,7 @@ import threading
 import tkinter as tk
 from tkinter import messagebox, scrolledtext
 
+from inference_engine import run_inference_json
 from llm_client import OllamaClient, load_env_file
 from prompts import DEFAULT_SYSTEM_PROMPT
 from rules import (
@@ -22,6 +23,7 @@ class OllamaExpertGUI:
 
         self.complaint_type_var = tk.StringVar(value=DEFAULT_INPUT["complaint_type"])
         self.reaction_var = tk.StringVar(value=DEFAULT_INPUT["violator_reaction"])
+        self.inference_mode_var = tk.StringVar(value="engine")
         self.input_vars = {}
         self.response_raw = ""
         self.client_info = load_env_file()
@@ -114,6 +116,21 @@ class OllamaExpertGUI:
             column = index % 2
             checkbox.grid(row=row, column=column, sticky="w", padx=(0, 24), pady=6)
 
+        mode_frame = tk.LabelFrame(panel, text="Режим вывода", padx=8, pady=8)
+        mode_frame.pack(fill="x", pady=(10, 0))
+        tk.Radiobutton(
+            mode_frame,
+            text="Машина вывода",
+            variable=self.inference_mode_var,
+            value="engine",
+        ).pack(side="left")
+        tk.Radiobutton(
+            mode_frame,
+            text="LLM / Ollama",
+            variable=self.inference_mode_var,
+            value="llm",
+        ).pack(side="left", padx=(16, 0))
+
         buttons = tk.Frame(panel)
         buttons.pack(fill="x", pady=(14, 8))
 
@@ -194,7 +211,7 @@ class OllamaExpertGUI:
         self.missing_data_text = self._create_text_block(lists_frame, "Недостающие данные", 1, 0)
         self.explanation_text = self._create_text_block(lists_frame, "Пояснение", 1, 1)
 
-        raw_frame = tk.LabelFrame(panel, text="Сырой ответ модели (JSON)", padx=8, pady=8)
+        raw_frame = tk.LabelFrame(panel, text="Сырой ответ (JSON)", padx=8, pady=8)
         raw_frame.pack(fill="both", expand=True, pady=(10, 0))
         self.raw_response_text = scrolledtext.ScrolledText(raw_frame, wrap=tk.WORD, height=10)
         self.raw_response_text.pack(fill="both", expand=True)
@@ -257,6 +274,19 @@ class OllamaExpertGUI:
         if data["settlement_success"] and data["refused_to_reduce_noise"]:
             return False, "Нельзя одновременно указать успешное урегулирование и отказ убавить звук."
 
+        if data["settlement_success"] and data["refuses_to_leave"]:
+            return False, "Нельзя одновременно указать успешное урегулирование и отказ покидать номер."
+
+        if data["settlement_success"] and data["repeated_ignore"]:
+            return False, "Нельзя одновременно указать успешное урегулирование и повторный игнор."
+
+        if data["refuses_to_leave"] and not (
+            reaction == "aggression"
+            or data["refused_to_reduce_noise"]
+            or data["repeated_ignore"]
+        ):
+            return False, "Отказ покидать номер можно указывать только при агрессии, отказе снизить шум или повторном игноре."
+
         return True, ""
 
     def update_input_preview(self):
@@ -300,6 +330,16 @@ class OllamaExpertGUI:
         if not is_valid:
             messagebox.showwarning("Некорректные данные", error_text)
             self.set_status("Ошибка валидации")
+            return
+
+        if self.inference_mode_var.get() == "engine":
+            self.send_btn.config(state="disabled")
+            self.set_status("Выполнение машиной вывода...")
+            try:
+                content = run_inference_json(DEFAULT_RULES, input_data)
+                self.show_response(content)
+            except Exception as e:
+                self.show_error(str(e))
             return
 
         self.send_btn.config(state="disabled")
