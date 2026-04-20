@@ -5,7 +5,13 @@ from tkinter import messagebox, scrolledtext
 
 from llm_client import OllamaClient, load_env_file
 from prompts import DEFAULT_SYSTEM_PROMPT
-from rules import DEFAULT_INPUT, DEFAULT_RULES, INPUT_FIELD_LABELS
+from rules import (
+    BOOLEAN_FIELD_LABELS,
+    COMPLAINT_TYPE_OPTIONS,
+    DEFAULT_INPUT,
+    DEFAULT_RULES,
+    REACTION_OPTIONS,
+)
 
 
 class OllamaExpertGUI:
@@ -14,6 +20,8 @@ class OllamaExpertGUI:
         self.root.title("Экспертная система по жалобам на шум")
         self.root.geometry("1180x820")
 
+        self.complaint_type_var = tk.StringVar(value=DEFAULT_INPUT["complaint_type"])
+        self.reaction_var = tk.StringVar(value=DEFAULT_INPUT["violator_reaction"])
         self.input_vars = {}
         self.response_raw = ""
         self.client_info = load_env_file()
@@ -42,7 +50,7 @@ class OllamaExpertGUI:
 
         hint = tk.Label(
             header,
-            text="Отметьте факты по ситуации и нажмите «Выполнить вывод». Правила и системный промпт скрыты внутри программы.",
+            text="Выберите тип жалобы, реакцию нарушителя и дополнительные факты, затем нажмите «Выполнить вывод».",
             fg="#333333",
         )
         hint.pack(anchor="w", pady=(6, 0))
@@ -63,10 +71,35 @@ class OllamaExpertGUI:
         panel = tk.LabelFrame(parent, text="Входные данные", padx=10, pady=10)
         panel.pack(fill="both", expand=True)
 
-        grid = tk.Frame(panel)
+        complaint_frame = tk.LabelFrame(panel, text="Тип жалобы", padx=8, pady=8)
+        complaint_frame.pack(fill="x", pady=(0, 10))
+        for value, label in COMPLAINT_TYPE_OPTIONS:
+            tk.Radiobutton(
+                complaint_frame,
+                text=label,
+                variable=self.complaint_type_var,
+                value=value,
+                command=self.update_input_preview,
+            ).pack(anchor="w")
+
+        reaction_frame = tk.LabelFrame(panel, text="Реакция нарушителя", padx=8, pady=8)
+        reaction_frame.pack(fill="x", pady=(0, 10))
+        for value, label in REACTION_OPTIONS:
+            tk.Radiobutton(
+                reaction_frame,
+                text=label,
+                variable=self.reaction_var,
+                value=value,
+                command=self.update_input_preview,
+            ).pack(anchor="w")
+
+        facts_frame = tk.LabelFrame(panel, text="Дополнительные факты", padx=8, pady=8)
+        facts_frame.pack(fill="x")
+
+        grid = tk.Frame(facts_frame)
         grid.pack(fill="x")
 
-        for index, (key, label_text) in enumerate(INPUT_FIELD_LABELS):
+        for index, (key, label_text) in enumerate(BOOLEAN_FIELD_LABELS):
             var = tk.BooleanVar(value=bool(DEFAULT_INPUT.get(key, False)))
             self.input_vars[key] = var
             checkbox = tk.Checkbutton(
@@ -104,9 +137,17 @@ class OllamaExpertGUI:
             buttons,
             text="Пример: первичная жалоба",
             width=24,
-            command=self.fill_example_case,
+            command=self.fill_example_primary_case,
         )
         fill_case_btn.pack(side="left")
+
+        fill_escalation_btn = tk.Button(
+            buttons,
+            text="Пример: эскалация",
+            width=20,
+            command=self.fill_example_escalation_case,
+        )
+        fill_escalation_btn.pack(side="left", padx=8)
 
         self.status_label = tk.Label(panel, text="Готово", anchor="w")
         self.status_label.pack(fill="x", pady=(4, 0))
@@ -143,9 +184,6 @@ class OllamaExpertGUI:
         self.final_decision_value.grid(row=1, column=1, sticky="nsew", padx=(8, 0), pady=(6, 0))
         self._make_text_copyable_readonly(self.final_decision_value)
 
-        copy_btn = tk.Button(top, text="Копировать всё", command=self.copy_all_results)
-        copy_btn.grid(row=0, column=2, rowspan=2, padx=(12, 0), sticky="ne")
-
         lists_frame = tk.Frame(panel)
         lists_frame.pack(fill="both", expand=True)
         lists_frame.grid_columnconfigure(0, weight=1)
@@ -174,15 +212,11 @@ class OllamaExpertGUI:
 
     @staticmethod
     def _make_text_copyable_readonly(widget):
-        widget.bind("<Key>", lambda event: "break")
-        widget.bind("<Control-v>", lambda event: "break")
-        widget.bind("<Button-3>", lambda event: "break")
+        widget.config(state="disabled")
 
     @staticmethod
     def _make_entry_copyable_readonly(widget):
-        widget.bind("<Key>", lambda event: "break")
-        widget.bind("<Control-v>", lambda event: "break")
-        widget.bind("<Button-3>", lambda event: "break")
+        widget.config(state="readonly")
 
     def apply_defaults(self):
         self.update_input_preview()
@@ -193,41 +227,81 @@ class OllamaExpertGUI:
 
     def collect_input_data(self):
         data = dict(DEFAULT_INPUT)
+        data["complaint_type"] = self.complaint_type_var.get()
+        data["violator_reaction"] = self.reaction_var.get()
+
         for key, var in self.input_vars.items():
             data[key] = bool(var.get())
 
-        for flag_key in [
-            "rule1_done", "rule2_done", "rule3_done", "rule4_done", "rule5_done",
-            "rule6_done", "rule6_vip_done", "rule6_non_vip_done", "rule7_done",
-            "rule8_done", "rule9_done", "rule10_done",
-        ]:
+        user_input_keys = {
+            "complaint_type",
+            "violator_reaction",
+            *(key for key, _ in BOOLEAN_FIELD_LABELS),
+        }
+        for flag_key in data.keys() - user_input_keys:
             data[flag_key] = False
         return data
+
+    def validate_input(self, data):
+        reaction = data["violator_reaction"]
+
+        if data["repeated_ignore"] and reaction != "ignore":
+            return False, "Повторный игнор можно указывать только при реакции 'игнор'."
+
+        if data["refused_to_reduce_noise"] and reaction != "contact":
+            return False, "Отказ убавить звук можно указывать только при реакции 'контакт'."
+
+        if data["settlement_success"] and reaction != "contact":
+            return False, "Успех урегулирования возможен только при реакции 'контакт'."
+
+        if data["settlement_success"] and data["refused_to_reduce_noise"]:
+            return False, "Нельзя одновременно указать успешное урегулирование и отказ убавить звук."
+
+        return True, ""
 
     def update_input_preview(self):
         payload = self.collect_input_data()
         self._set_text(self.input_preview, json.dumps(payload, ensure_ascii=False, indent=2))
 
     def reset_form(self):
-        for key, _ in INPUT_FIELD_LABELS:
+        self.complaint_type_var.set(DEFAULT_INPUT["complaint_type"])
+        self.reaction_var.set(DEFAULT_INPUT["violator_reaction"])
+        for key, _ in BOOLEAN_FIELD_LABELS:
             self.input_vars[key].set(bool(DEFAULT_INPUT.get(key, False)))
         self.update_input_preview()
         self.clear_output()
         self.set_status("Форма сброшена")
 
-    def fill_example_case(self):
+    def fill_example_primary_case(self):
+        self.complaint_type_var.set("primary")
+        self.reaction_var.set("contact")
         for key in self.input_vars:
             self.input_vars[key].set(False)
-        self.input_vars["noise_complaint"].set(True)
-        self.input_vars["primary_complaint"].set(True)
-        self.input_vars["contact_reaction"].set(True)
         self.update_input_preview()
         self.clear_output()
         self.set_status("Подставлен пример первичной жалобы")
 
+    def fill_example_escalation_case(self):
+        self.complaint_type_var.set("repeat")
+        self.reaction_var.set("contact")
+        for key in self.input_vars:
+            self.input_vars[key].set(False)
+        self.input_vars["complainant_insists"].set(True)
+        self.input_vars["refused_to_reduce_noise"].set(True)
+        self.input_vars["refuses_to_leave"].set(True)
+        self.update_input_preview()
+        self.clear_output()
+        self.set_status("Подставлен пример эскалации")
+
     def send_request(self):
         self.update_input_preview()
         input_data = self.collect_input_data()
+        is_valid, error_text = self.validate_input(input_data)
+        if not is_valid:
+            messagebox.showwarning("Некорректные данные", error_text)
+            self.set_status("Ошибка валидации")
+            return
+
         self.send_btn.config(state="disabled")
         self.set_status("Отправка запроса...")
 
@@ -302,8 +376,10 @@ class OllamaExpertGUI:
 
     @staticmethod
     def _set_text(widget, text):
+        widget.config(state="normal")
         widget.delete("1.0", tk.END)
         widget.insert("1.0", text or "—")
+        widget.config(state="disabled")
 
     def _set_text_list(self, widget, items, empty_text="—"):
         if not items:
