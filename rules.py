@@ -7,6 +7,7 @@ __all__ = [
     "COMPLAINT_TYPE_OPTIONS",
     "REACTION_OPTIONS",
     "BOOLEAN_FIELD_LABELS",
+    "STATE_FLAGS",
     "DEFAULT_INPUT",
     "DEFAULT_RULES",
 ]
@@ -26,7 +27,7 @@ BOOLEAN_FIELD_LABELS = [
     ("refuses_to_leave", "Нарушитель отказывается покидать номер"),
 ]
 
-_STATE_FLAGS = [
+STATE_FLAGS = [
     "warning_done",
     "door_warning_done",
     "priority_raised",
@@ -58,8 +59,6 @@ DEFAULT_INPUT = {
     "refused_to_reduce_noise": False,
     "refuses_to_leave": False,
 }
-
-DEFAULT_INPUT.update({flag: False for flag in _STATE_FLAGS})
 
 DEFAULT_RULES = [
     {

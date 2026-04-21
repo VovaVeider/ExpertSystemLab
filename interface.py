@@ -243,20 +243,14 @@ class OllamaExpertGUI:
         self.status_label.config(text=text)
 
     def collect_input_data(self):
-        data = dict(DEFAULT_INPUT)
-        data["complaint_type"] = self.complaint_type_var.get()
-        data["violator_reaction"] = self.reaction_var.get()
+        data = {
+            "complaint_type": self.complaint_type_var.get(),
+            "violator_reaction": self.reaction_var.get(),
+        }
 
         for key, var in self.input_vars.items():
             data[key] = bool(var.get())
 
-        user_input_keys = {
-            "complaint_type",
-            "violator_reaction",
-            *(key for key, _ in BOOLEAN_FIELD_LABELS),
-        }
-        for flag_key in data.keys() - user_input_keys:
-            data[flag_key] = False
         return data
 
     def validate_input(self, data):

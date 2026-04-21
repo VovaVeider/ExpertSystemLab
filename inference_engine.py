@@ -2,7 +2,12 @@ import json
 
 
 def run_inference(rules, input_data):
-    state = dict(input_data)
+    state_flag_names = collect_state_flag_names(rules)
+    state = {
+        key: value
+        for key, value in input_data.items()
+        if key not in state_flag_names
+    }
     triggered_rules = []
     actions = []
     applied_rule_ids = set()
@@ -56,7 +61,13 @@ def run_inference(rules, input_data):
         "actions": actions,
         "final": final,
         "final_decision": final_decision if final else None,
-        "missing_data": find_missing_data(rules, state, applied_rule_ids, final),
+        "missing_data": find_missing_data(
+            rules,
+            state,
+            applied_rule_ids,
+            final,
+            state_flag_names,
+        ),
         "conflict_detected": False,
         "explanation": build_explanation(triggered_rules, final, final_decision),
     }
@@ -77,6 +88,14 @@ def condition_matches(condition, state):
         return state.get(condition["var"]) == condition["eq"]
 
     return False
+
+
+def collect_state_flag_names(rules):
+    state_flag_names = set()
+    for rule in rules:
+        set_flags = rule.get("then", {}).get("set_flags", {})
+        state_flag_names.update(set_flags.keys())
+    return state_flag_names
 
 
 def detect_conflicts(state):
@@ -113,7 +132,7 @@ def detect_conflicts(state):
     return conflicts
 
 
-def find_missing_data(rules, state, applied_rule_ids, final):
+def find_missing_data(rules, state, applied_rule_ids, final, state_flag_names):
     if final:
         return []
 
@@ -121,23 +140,25 @@ def find_missing_data(rules, state, applied_rule_ids, final):
     for rule in rules:
         if rule.get("id") in applied_rule_ids:
             continue
-        collect_missing_vars(rule.get("if", {}), state, missing_data)
+        collect_missing_vars(rule.get("if", {}), state, missing_data, state_flag_names)
 
     return missing_data
 
 
-def collect_missing_vars(condition, state, missing_data):
+def collect_missing_vars(condition, state, missing_data, state_flag_names):
     if "all" in condition:
         for item in condition["all"]:
-            collect_missing_vars(item, state, missing_data)
+            collect_missing_vars(item, state, missing_data, state_flag_names)
         return
 
     if "any" in condition:
         for item in condition["any"]:
-            collect_missing_vars(item, state, missing_data)
+            collect_missing_vars(item, state, missing_data, state_flag_names)
         return
 
     var_name = condition.get("var")
+    if var_name in state_flag_names:
+        return
     if var_name and var_name not in state and var_name not in missing_data:
         missing_data.append(var_name)
 
